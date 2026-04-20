@@ -1,5 +1,20 @@
 #!/usr/bin/env bash
 
+validate_certbot_email() {
+  local email="$1"
+
+  if ! [[ "$email" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]; then
+    log_error "Invalid email '$email'. Please provide a valid address (e.g. admin@example.com)."
+    exit 1
+  fi
+}
+
+resolve_certbot_email() {
+  CERTBOT_EMAIL="${CERTBOT_EMAIL:-}"
+  CERTBOT_EMAIL="$(ensure_value "email" "Email for Let's Encrypt notifications: " "$CERTBOT_EMAIL")"
+  validate_certbot_email "$CERTBOT_EMAIL"
+}
+
 ensure_certbot_installed() {
   if detect_certbot_installed; then
     log_info "Certbot already installed."
@@ -41,8 +56,9 @@ ensure_ssl_certificate() {
     fi
   fi
 
+  resolve_certbot_email
   log_info "Requesting Let's Encrypt certificate for $domain"
-  certbot --nginx -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email --redirect
+  certbot --nginx -d "$domain" --non-interactive --agree-tos --email "$CERTBOT_EMAIL" --redirect
 
   if [ ! -f "$config_path" ]; then
     log_warn "Certbot completed, but expected config file missing: $config_path"

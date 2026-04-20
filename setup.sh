@@ -29,6 +29,7 @@ INSTALL_PM2=false
 NODE_VERSION_CHANNEL=""
 PM2_APP_NAME=""
 PM2_START_COMMAND=""
+CERTBOT_EMAIL=""
 DOMAIN=""
 PORT=""
 PROXY_HOST="127.0.0.1"
@@ -50,6 +51,7 @@ Options:
   --with-pm2             Ensure PM2 is installed
   --pm2-name=NAME        PM2 process name (used with --with-pm2)
   --pm2-cmd=CMD          PM2 start command (used with --with-pm2)
+  --email=EMAIL          Email for Let's Encrypt registration/expiry notices
   --force                Skip confirmations where safe
   --non-interactive      Fail instead of prompting when a decision is needed
   --help                 Show this help text
@@ -77,6 +79,7 @@ parse_args() {
       --with-pm2) INSTALL_PM2=true ;;
       --pm2-name=*) PM2_APP_NAME="${1#*=}" ;;
       --pm2-cmd=*) PM2_START_COMMAND="${1#*=}" ;;
+      --email=*) CERTBOT_EMAIL="${1#*=}" ;;
       --force) FORCE=true ;;
       --non-interactive) NON_INTERACTIVE=true ;;
       --help|-h)

@@ -32,7 +32,7 @@ scripts/
     ssl.sh          # certbot install + SSL issuance/reissue logic
     firewall.sh     # ufw detection + safe port allow
   config/
-    nginx_config.sh # nginx server blocks, update/overwrite, nginx -t checks
+    nginx_config.sh   # nginx server blocks, update/overwrite, nginx -t checks
     domain_manager.sh # domain decision flow + orchestration per domain
   utils/
     backup.sh       # timestamped backup + rollback helpers
@@ -77,6 +77,7 @@ scripts/
 - `--with-pm2`: Ensure PM2 is installed globally.
 - `--pm2-name=NAME`: Set PM2 process name when creating a PM2 app.
 - `--pm2-cmd=CMD`: Set PM2 startup command (supports env vars and chained commands).
+- `--email=EMAIL`: Set Let's Encrypt account/expiry email used during SSL issuance.
 - `--force`: Auto-accept safe defaults and skip interactive confirmations.
 - `--non-interactive`: Fail instead of prompting when input/decision is needed.
 - `--help`: Show usage.

@@ -4,73 +4,101 @@ pm2_target_user() {
   resolve_node_target_user
 }
 
-run_as_pm2_user_with_nvm() {
-  local cmd="$1"
+run_as_pm2_user_with_nvm_script() {
+  local script_path="$1"
   local target_user
   target_user="$(pm2_target_user)"
-  su - "$target_user" -c "bash -lc 'export NVM_DIR=\"\$HOME/.nvm\"; [ -s \"\$NVM_DIR/nvm.sh\" ] && . \"\$NVM_DIR/nvm.sh\"; ${cmd}'"
+
+  su - "$target_user" -c "bash -lc 'set -e; export NVM_DIR=\"\$HOME/.nvm\"; [ -s \"\$NVM_DIR/nvm.sh\" ] && . \"\$NVM_DIR/nvm.sh\"; bash \"$script_path\"'"
+}
+
+run_as_pm2_user_with_nvm_cmd() {
+  local command_text="$1"
+  local cmd_script=""
+  local rc=0
+
+  cmd_script="$(mktemp /tmp/aws-bootstack-pm2-cmd.XXXXXX.sh)"
+  printf '#!/usr/bin/env bash\nset -e\n%s\n' "$command_text" >"$cmd_script"
+  chmod 700 "$cmd_script"
+
+  if ! run_as_pm2_user_with_nvm_script "$cmd_script"; then
+    rc=$?
+  fi
+
+  rm -f "$cmd_script"
+  return "$rc"
+}
+
+pm2_available_for_user() {
+  run_as_pm2_user_with_nvm_cmd "command -v pm2 >/dev/null 2>&1"
+}
+
+npm_available_for_user() {
+  run_as_pm2_user_with_nvm_cmd "command -v npm >/dev/null 2>&1"
+}
+
+validate_pm2_app_name() {
+  local app_name="$1"
+
+  if ! [[ "$app_name" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    log_error "Invalid PM2 app name '$app_name'. Use only letters, numbers, dot, underscore, or hyphen."
+    exit 1
+  fi
 }
 
 ensure_pm2_installed() {
-  if command_exists pm2; then
-    log_info "PM2 already installed."
-    return 0
-  fi
-
-  if command_exists npm; then
-    log_info "Installing PM2 globally (system npm)."
-    npm install -g pm2
-    log_success "PM2 installed successfully."
-    return 0
-  fi
-
   local target_user
   target_user="$(pm2_target_user)"
 
-  if ! run_as_pm2_user_with_nvm "command -v npm >/dev/null 2>&1"; then
-    log_error "npm is required to install PM2. Install Node.js first."
+  if pm2_available_for_user; then
+    log_info "PM2 already installed for user '$target_user'."
+    return 0
+  fi
+
+  if ! npm_available_for_user; then
+    log_error "npm is required to install PM2 for '$target_user'. Install Node.js first."
     exit 1
   fi
 
-  log_info "Installing PM2 for user '$target_user' via npm (nvm environment)."
-  run_as_pm2_user_with_nvm "npm install -g pm2"
+  log_info "Installing PM2 for user '$target_user' (nvm context)."
+  run_as_pm2_user_with_nvm_cmd "npm install -g pm2"
   log_success "PM2 installed successfully for user '$target_user'."
 }
 
 pm2_process_exists() {
   local app_name="$1"
+  local quoted_name
 
-  if command_exists pm2; then
-    pm2 describe "$app_name" >/dev/null 2>&1
-    return $?
-  fi
-
-  run_as_pm2_user_with_nvm "pm2 describe \"$app_name\" >/dev/null 2>&1"
+  quoted_name="$(printf '%q' "$app_name")"
+  run_as_pm2_user_with_nvm_cmd "pm2 describe ${quoted_name} >/dev/null 2>&1"
 }
 
 pm2_start_app() {
   local app_name="$1"
   local start_command="$2"
+  local start_script=""
+  local quoted_name=""
+  local quoted_script=""
 
-  if command_exists pm2; then
-    pm2 start bash --name "$app_name" -- -lc "$start_command"
-    pm2 save
-    return 0
-  fi
+  start_script="$(mktemp /tmp/aws-bootstack-pm2-start.XXXXXX.sh)"
+  trap 'rm -f "$start_script"' RETURN
 
-  run_as_pm2_user_with_nvm "pm2 start bash --name \"$app_name\" -- -lc \"$start_command\""
-  run_as_pm2_user_with_nvm "pm2 save"
+  printf '#!/usr/bin/env bash\nset -Eeuo pipefail\n%s\n' "$start_command" >"$start_script"
+  chmod 700 "$start_script"
+
+  quoted_name="$(printf '%q' "$app_name")"
+  quoted_script="$(printf '%q' "$start_script")"
+
+  run_as_pm2_user_with_nvm_cmd "pm2 start bash --name ${quoted_name} -- ${quoted_script}"
+  run_as_pm2_user_with_nvm_cmd "pm2 save"
 }
 
 pm2_delete_app() {
   local app_name="$1"
+  local quoted_name
 
-  if command_exists pm2; then
-    pm2 delete "$app_name"
-    return 0
-  fi
-
-  run_as_pm2_user_with_nvm "pm2 delete \"$app_name\""
+  quoted_name="$(printf '%q' "$app_name")"
+  run_as_pm2_user_with_nvm_cmd "pm2 delete ${quoted_name}"
 }
 
 configure_pm2_app() {
@@ -87,6 +115,7 @@ configure_pm2_app() {
     exit 1
   fi
 
+  validate_pm2_app_name "$app_name"
   ensure_pm2_installed
 
   if pm2_process_exists "$app_name"; then
