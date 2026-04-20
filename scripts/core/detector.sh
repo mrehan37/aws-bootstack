@@ -124,6 +124,90 @@ detect_domains() {
   done
 }
 
+detect_pm2_apps() {
+  if ! command_exists pm2; then
+    return 0
+  fi
+
+  if ! command_exists node; then
+    printf 'unknown|unknown|unknown\n'
+    return 0
+  fi
+
+  pm2 jlist 2>/dev/null | node -e '
+let input="";
+process.stdin.on("data",c=>input+=c);
+process.stdin.on("end",()=>{
+  try {
+    const apps = JSON.parse(input || "[]");
+    if (!Array.isArray(apps) || apps.length === 0) return;
+    for (const app of apps) {
+      const name = app.name || "unknown";
+      const status = (app.pm2_env && app.pm2_env.status) || "unknown";
+      const mode = (app.pm2_env && app.pm2_env.exec_mode) || "unknown";
+      process.stdout.write(`${name}|${status}|${mode}\n`);
+    }
+  } catch (_) {}
+});
+'
+}
+
+print_server_summary() {
+  local domain=""
+  local file=""
+  local port=""
+  local ssl_label=""
+  local domain_entries=""
+  local ssl_count=0
+  local pm2_name=""
+  local pm2_status=""
+  local pm2_mode=""
+  local pm2_entries=""
+  local node_label=""
+  local pm2_label=""
+
+  while IFS='|' read -r domain file port ssl_label; do
+    [ -n "$domain" ] || continue
+    domain_entries="${domain_entries}  - ${domain} -> port ${port} (ssl: ${ssl_label})"$'\n'
+    if [ "$ssl_label" = "enabled" ]; then
+      ssl_count=$((ssl_count + 1))
+    fi
+  done < <(detect_domains)
+
+  if command_exists node; then
+    node_label="$(status_ok "$(node -v)")"
+  else
+    node_label="$(status_bad "Not installed")"
+  fi
+
+  if command_exists pm2; then
+    pm2_label="$(status_ok "Installed")"
+    while IFS='|' read -r pm2_name pm2_status pm2_mode; do
+      [ -n "$pm2_name" ] || continue
+      pm2_entries="${pm2_entries}  - ${pm2_name} (${pm2_status}, ${pm2_mode})"$'\n'
+    done < <(detect_pm2_apps)
+  else
+    pm2_label="$(status_bad "Not installed")"
+  fi
+
+  printf '\n%sServer Summary%s\n' "$COLOR_BOLD" "$COLOR_RESET"
+  printf -- '- Nginx: %s\n' "$(detect_nginx_installed && status_ok "Installed" || status_bad "Not installed")"
+  printf -- '- Node.js: %s\n' "$node_label"
+  printf -- '- PM2: %s\n' "$pm2_label"
+  printf -- '- Domains:\n'
+  if [ -n "$domain_entries" ]; then
+    printf '%s' "$domain_entries"
+  else
+    printf '  - none\n'
+  fi
+  printf -- '- SSL-enabled domains: %s\n' "$ssl_count"
+  if [ -n "$pm2_entries" ]; then
+    printf -- '- PM2 apps:\n%s' "$pm2_entries"
+  else
+    printf -- '- PM2 apps:\n  - none\n'
+  fi
+}
+
 scan_mode() {
   local nginx_label="Not installed"
   local firewall_label="Not installed"

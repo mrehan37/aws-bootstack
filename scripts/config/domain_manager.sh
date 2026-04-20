@@ -5,11 +5,11 @@ request_domain_update_mode() {
   local existing_config="$2"
 
   log_warn "Domain already configured: $domain"
-  log_info "Existing config file: $existing_config"
-  log_info "Options:"
-  log_info "1) Skip"
-  log_info "2) Update config"
-  log_info "3) Overwrite completely"
+  log_info "Existing config file: $existing_config" >&2
+  log_info "Options:" >&2
+  log_info "1) Skip" >&2
+  log_info "2) Update config" >&2
+  log_info "3) Overwrite completely" >&2
 
   choose_option "Choose [1-3] (default: 1): " "1"
 }
