@@ -1,32 +1,5 @@
 #!/usr/bin/env bash
 
-node_version_matches_request() {
-  local requested_channel="$1"
-  local installed_version=""
-  local installed_major=""
-
-  if ! command_exists node; then
-    return 1
-  fi
-
-  installed_version="$(node -v 2>/dev/null || true)"
-  installed_major="$(printf '%s' "$installed_version" | sed -E 's/^v([0-9]+).*/\1/')"
-
-  case "$requested_channel" in
-    lts)
-      # LTS line changes over time; any installed node is acceptable unless forced.
-      return 0
-      ;;
-    24|22|20|18)
-      [ "$installed_major" = "$requested_channel" ]
-      return $?
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
 normalize_node_version_channel() {
   local raw="${1:-lts}"
 
@@ -43,56 +16,97 @@ normalize_node_version_channel() {
   esac
 }
 
-install_nodejs_from_nodesource() {
+node_selector_for_channel() {
+  local channel="$1"
+
+  case "$channel" in
+    lts) printf '--lts' ;;
+    24|22|20|18) printf "${channel}" ;;
+    *)
+      log_error "Unsupported node channel: $channel"
+      exit 1
+      ;;
+  esac
+}
+
+resolve_node_target_user() {
+  if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    printf '%s' "$SUDO_USER"
+    return 0
+  fi
+  printf '%s' "${USER:-root}"
+}
+
+resolve_node_target_home() {
+  local target_user="$1"
+  local home_dir
+
+  home_dir="$(getent passwd "$target_user" | cut -d: -f6 || true)"
+  if [ -z "$home_dir" ]; then
+    log_error "Unable to resolve home directory for user '$target_user'."
+    exit 1
+  fi
+  printf '%s' "$home_dir"
+}
+
+ensure_nvm_installed_for_user() {
+  local target_user="$1"
+  local target_home="$2"
+  local nvm_dir="${target_home}/.nvm"
+
+  if [ -s "${nvm_dir}/nvm.sh" ]; then
+    return 0
+  fi
+
+  log_info "Installing nvm for user '$target_user'."
+  su - "$target_user" -c "bash -lc 'curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash'"
+}
+
+node_installed_for_user_channel() {
+  local target_user="$1"
+  local channel="$2"
+  local selector
+  selector="$(node_selector_for_channel "$channel")"
+
+  su - "$target_user" -c "bash -lc 'export NVM_DIR=\"\$HOME/.nvm\"; [ -s \"\$NVM_DIR/nvm.sh\" ] || exit 1; . \"\$NVM_DIR/nvm.sh\"; nvm version ${selector} >/dev/null 2>&1'"
+}
+
+install_node_with_nvm() {
   local requested_channel="$1"
+  local target_user="$2"
+  local selector
+  selector="$(node_selector_for_channel "$requested_channel")"
 
-  apt-get update
-  apt-get install -y ca-certificates curl gnupg
-  install -d -m 0755 /etc/apt/keyrings
+  if node_installed_for_user_channel "$target_user" "$requested_channel"; then
+    log_info "Node.js channel '${requested_channel}' already installed via nvm for user '$target_user'."
+  else
+    log_info "Installing Node.js (${requested_channel}) via nvm for user '$target_user'."
+    su - "$target_user" -c "bash -lc 'export NVM_DIR=\"\$HOME/.nvm\"; . \"\$NVM_DIR/nvm.sh\"; nvm install ${selector}'"
+  fi
 
-  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-    | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
-  chmod a+r /etc/apt/keyrings/nodesource.gpg
-
-  cat >/etc/apt/sources.list.d/nodesource.list <<EOF
-deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${requested_channel}.x nodistro main
-EOF
-
-  apt-get update
-  apt-get install -y nodejs
+  su - "$target_user" -c "bash -lc 'export NVM_DIR=\"\$HOME/.nvm\"; . \"\$NVM_DIR/nvm.sh\"; nvm alias default ${selector} >/dev/null; nvm use ${selector} >/dev/null; node -v; npm -v'" >/tmp/node_versions.$$ 2>/dev/null || true
+  if [ -f /tmp/node_versions.$$ ]; then
+    local node_ver
+    local npm_ver
+    node_ver="$(sed -n '1p' /tmp/node_versions.$$ || true)"
+    npm_ver="$(sed -n '2p' /tmp/node_versions.$$ || true)"
+    rm -f /tmp/node_versions.$$
+    [ -n "$node_ver" ] && log_success "Node.js installed for '$target_user': $node_ver"
+    [ -n "$npm_ver" ] && log_success "npm installed for '$target_user': $npm_ver"
+  fi
 }
 
 ensure_node_installed() {
   local requested_channel
+  local target_user
+  local target_home
+
   requested_channel="$(normalize_node_version_channel "${1:-lts}")"
 
-  if command_exists node && command_exists npm; then
-    if node_version_matches_request "$requested_channel"; then
-      log_info "Node.js already installed: $(node -v)"
-      return 0
-    fi
-
-    if [ "${FORCE:-false}" != true ]; then
-      log_warn "Node.js $(node -v) already installed and requested channel is ${requested_channel}.x."
-      log_warn "Skipping Node.js reinstall. Use --force to replace existing Node.js."
-      return 0
-    fi
-
-    log_warn "Replacing existing Node.js due to --force."
-  fi
-
-  log_info "Installing Node.js ${requested_channel}.x from NodeSource."
-  install_nodejs_from_nodesource "$requested_channel"
-
-  if command_exists node; then
-    log_success "Node.js installed: $(node -v)"
-  fi
-
-  if command_exists npm; then
-    log_success "npm installed: $(npm -v)"
-  else
-    log_warn "npm binary not found after Node.js installation."
-  fi
+  target_user="$(resolve_node_target_user)"
+  target_home="$(resolve_node_target_home "$target_user")"
+  ensure_nvm_installed_for_user "$target_user" "$target_home"
+  install_node_with_nvm "$requested_channel" "$target_user"
 }
 
 prompt_node_version_channel() {

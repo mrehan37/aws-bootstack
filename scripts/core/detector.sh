@@ -125,16 +125,13 @@ detect_domains() {
 }
 
 detect_pm2_apps() {
-  if ! command_exists pm2; then
-    return 0
-  fi
+  local json_payload=""
+  local target_user=""
 
-  if ! command_exists node; then
-    printf 'unknown|unknown|unknown\n'
-    return 0
-  fi
-
-  pm2 jlist 2>/dev/null | node -e '
+  if command_exists pm2 && command_exists node; then
+    json_payload="$(pm2 jlist 2>/dev/null || true)"
+    [ -n "$json_payload" ] || return 0
+    printf '%s' "$json_payload" | node -e '
 let input="";
 process.stdin.on("data",c=>input+=c);
 process.stdin.on("end",()=>{
@@ -150,6 +147,29 @@ process.stdin.on("end",()=>{
   } catch (_) {}
 });
 '
+    return 0
+  fi
+
+  if declare -F resolve_node_target_user >/dev/null 2>&1; then
+    target_user="$(resolve_node_target_user)"
+    su - "$target_user" -c "bash -lc 'export NVM_DIR=\"\$HOME/.nvm\"; [ -s \"\$NVM_DIR/nvm.sh\" ] || exit 0; . \"\$NVM_DIR/nvm.sh\"; pm2 jlist 2>/dev/null | node -e \"let i=\\\"\\\";process.stdin.on(\\\"data\\\",c=>i+=c);process.stdin.on(\\\"end\\\",()=>{try{const a=JSON.parse(i||\\\"[]\\\");if(!Array.isArray(a)||a.length===0)return;for(const app of a){const n=app.name||\\\"unknown\\\";const s=(app.pm2_env&&app.pm2_env.status)||\\\"unknown\\\";const m=(app.pm2_env&&app.pm2_env.exec_mode)||\\\"unknown\\\";process.stdout.write(n+\\\"|\\\"+s+\\\"|\\\"+m+\\\"\\\\n\\\")}}catch(_){}});\"'" || true
+  fi
+}
+
+detect_node_version() {
+  if command_exists node; then
+    node -v 2>/dev/null || true
+    return 0
+  fi
+
+  if declare -F resolve_node_target_user >/dev/null 2>&1; then
+    local target_user=""
+    target_user="$(resolve_node_target_user)"
+    su - "$target_user" -c "bash -lc 'export NVM_DIR=\"\$HOME/.nvm\"; [ -s \"\$NVM_DIR/nvm.sh\" ] && . \"\$NVM_DIR/nvm.sh\"; node -v 2>/dev/null'" || true
+    return 0
+  fi
+
+  return 0
 }
 
 print_server_summary() {
@@ -163,8 +183,10 @@ print_server_summary() {
   local pm2_status=""
   local pm2_mode=""
   local pm2_entries=""
+  local pm2_detected=""
   local node_label=""
   local pm2_label=""
+  local node_version=""
 
   while IFS='|' read -r domain file port ssl_label; do
     [ -n "$domain" ] || continue
@@ -174,18 +196,20 @@ print_server_summary() {
     fi
   done < <(detect_domains)
 
-  if command_exists node; then
-    node_label="$(status_ok "$(node -v)")"
+  node_version="$(detect_node_version)"
+  if [ -n "$node_version" ]; then
+    node_label="$(status_ok "$node_version")"
   else
     node_label="$(status_bad "Not installed")"
   fi
 
-  if command_exists pm2; then
+  pm2_detected="$(detect_pm2_apps || true)"
+  if command_exists pm2 || [ -n "$pm2_detected" ]; then
     pm2_label="$(status_ok "Installed")"
     while IFS='|' read -r pm2_name pm2_status pm2_mode; do
       [ -n "$pm2_name" ] || continue
       pm2_entries="${pm2_entries}  - ${pm2_name} (${pm2_status}, ${pm2_mode})"$'\n'
-    done < <(detect_pm2_apps)
+    done <<<"$pm2_detected"
   else
     pm2_label="$(status_bad "Not installed")"
   fi

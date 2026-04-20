@@ -73,7 +73,7 @@ scripts/
 - `--ssl`: Enable SSL issuance if cert is missing.
 - `--ssl-only`: Configure/renew SSL for an existing domain only.
 - `--with-node`: Ensure Node.js and npm are installed.
-- `--node-version=VER`: Set Node.js channel (`lts`, `24`, `22`, `20`, `18`) for `--with-node`.
+- `--node-version=VER`: Set Node.js channel (`lts`, `24`, `22`, `20`, `18`) for `--with-node` (installed via `nvm`).
 - `--with-pm2`: Ensure PM2 is installed globally.
 - `--pm2-name=NAME`: Set PM2 process name when creating a PM2 app.
 - `--pm2-cmd=CMD`: Set PM2 startup command (supports env vars and chained commands).
