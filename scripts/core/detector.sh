@@ -69,13 +69,23 @@ extract_port_from_proxy_target() {
 find_domain_config() {
   local domain="$1"
   local found=""
+  local escaped_domain=""
+  local default_config_path=""
 
   if [ -d "$NGINX_SITES_AVAILABLE" ]; then
-    found="$(grep -R -l -E "server_name[[:space:]]+.*(^|[[:space:]])${domain}([[:space:];]|$)" "$NGINX_SITES_AVAILABLE" 2>/dev/null | head -n 1 || true)"
+    escaped_domain="$(printf '%s' "$domain" | sed 's/[][(){}.+*?^$|\\/]/\\&/g')"
+    found="$(grep -R -l -E "^[[:space:]]*server_name[[:space:]]+.*(^|[[:space:]])${escaped_domain}([[:space:];]|$)" "$NGINX_SITES_AVAILABLE" 2>/dev/null | head -n 1 || true)"
   fi
 
   if [ -n "$found" ]; then
     printf '%s' "$found"
+    return 0
+  fi
+
+  # Fallback: if the conventional per-domain file exists, treat as existing config.
+  default_config_path="$(config_path_for_domain "$domain")"
+  if [ -f "$default_config_path" ]; then
+    printf '%s' "$default_config_path"
     return 0
   fi
 

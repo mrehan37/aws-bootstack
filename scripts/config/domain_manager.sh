@@ -72,7 +72,27 @@ configure_domain() {
     esac
   else
     config_path="$(config_path_for_domain "$DOMAIN")"
-    log_info "Creating new Nginx config for $DOMAIN"
+    if [ -f "$config_path" ]; then
+      log_warn "Config file exists at $config_path but domain match was not detected."
+      decision="$(request_domain_update_mode "$DOMAIN" "$config_path")"
+      case "$decision" in
+        1)
+          log_info "Skipping changes for existing config file $config_path."
+          return 0
+          ;;
+        2)
+          existing_config="$config_path"
+          ;;
+        3)
+          ;;
+        *)
+          log_error "Invalid selection: $decision"
+          exit 1
+          ;;
+      esac
+    else
+      log_info "Creating new Nginx config for $DOMAIN"
+    fi
   fi
 
   if ssl_exists_for_domain "$DOMAIN"; then
